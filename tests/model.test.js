@@ -10,4 +10,23 @@ assert.equal(model.batteryPercent(model.deviceSnapshot(exact)), 62)
 assert.match(model.tooltipText(null, 'Speaker', false), /not configured/)
 assert.equal(model.isHexColor('#abc'), true)
 assert.equal(model.isHexColor('red'), false)
+for (const type of ['Speaker', 'Headphones', 'Mouse', 'Keyboard']) {
+  for (const [configured, connected, variant] of [
+    [false, false, ''], [false, true, ''], [true, false, 'Outline'], [true, true, 'Filled']
+  ]) {
+    assert.equal(model.artworkFilename('glyph', type, 'shape', configured, connected), `MenuB${type}${variant}.png`)
+    assert.equal(model.artworkFilename('glyph', type, 'color', configured, connected), '')
+    assert.equal(model.artworkFilename('glyph', type, 'monochrome', configured, connected), '')
+  }
+  for (const family of ['a', 'b', 'c']) {
+    const prefix = `Menu${family.toUpperCase()}${type}`
+    for (const [configured, connected, variant] of [
+      [false, false, ''], [false, true, ''], [true, false, 'Outline'], [true, true, 'Filled']
+    ]) {
+      assert.equal(model.artworkFilename(family, type, 'shape', configured, connected), `${prefix}${variant}.png`)
+      assert.equal(model.artworkFilename(family, type, 'monochrome', configured, connected), `${prefix}${variant}.png`)
+      assert.equal(model.artworkFilename(family, type, 'color', configured, connected), `${prefix}.png`)
+    }
+  }
+}
 console.log('Presence models: OK')

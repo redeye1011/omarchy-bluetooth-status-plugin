@@ -22,6 +22,14 @@ function isHexColor(value) {
   return /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3}|[0-9a-fA-F]{8})$/.test(String(value || "").trim())
 }
 
+function artworkFilename(family, type, style, configured, connected) {
+  var artworkFamily = family === "glyph" ? (style === "shape" ? "B" : "") : family.toUpperCase()
+  if (!artworkFamily) return ""
+  var variant = (style === "shape" || style === "monochrome") && configured
+    ? (connected ? "Filled" : "Outline") : ""
+  return "Menu" + artworkFamily + type + variant + ".png"
+}
+
 function matchDevice(devices, address) {
   var values = toArray(devices)
   var target = normalizedAddress(address)
@@ -90,6 +98,7 @@ if (typeof module !== "undefined") {
     normalizedAddress: normalizedAddress,
     deviceLabel: deviceLabel,
     isHexColor: isHexColor,
+    artworkFilename: artworkFilename,
     matchDevice: matchDevice,
     needsRebind: needsRebind,
     deviceSnapshot: deviceSnapshot,

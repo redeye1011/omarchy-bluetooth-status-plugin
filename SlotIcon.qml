@@ -36,8 +36,9 @@ Item {
     var family = String(slotSetting("IconFamily", "glyph") || "glyph")
     return ["a", "b", "c"].indexOf(family) >= 0 ? family : "glyph"
   }
-  readonly property url imageSource: iconFamily === "glyph" ? "" : Qt.resolvedUrl("icons/Menu" + iconFamily.toUpperCase() + root.iconType
-    + ((statusStyle === "shape" || statusStyle === "monochrome") && isConfigured ? (isConnected ? "Filled" : "Outline") : "") + ".png")
+  readonly property string artworkFilename: Model.artworkFilename(iconFamily, iconType, statusStyle, isConfigured, isConnected)
+  readonly property bool useArtwork: artworkFilename !== ""
+  readonly property url imageSource: useArtwork ? Qt.resolvedUrl("icons/" + artworkFilename) : ""
   readonly property bool showWhenDisconnected: slotSetting("ShowWhenDisconnected", true) !== false
 
   readonly property var devices: Bluetooth.devices ? Bluetooth.devices.values : []
@@ -62,7 +63,7 @@ Item {
   readonly property color statusColor: {
     if (!isConfigured) return Color.muted
     if (statusStyle === "monochrome") return isConnected ? "#000000" : Color.foreground
-    if (statusStyle === "shape") return iconFamily === "glyph" && !isConnected ? Color.muted : Color.foreground
+    if (statusStyle === "shape") return Color.foreground
     return isConnected ? themeGreen : Color.urgent
   }
 
@@ -136,8 +137,8 @@ Item {
       Image {
         id: asset
         anchors.centerIn: parent
-        width: root.statusStyle === "shape" ? 18 : root.statusStyle === "monochrome" ? 14 : 17
-        height: root.statusStyle === "shape" ? 16 : root.statusStyle === "monochrome" ? 12 : 15
+        width: root.statusStyle === "shape" ? 20 : root.statusStyle === "monochrome" ? 14 : 17
+        height: root.statusStyle === "shape" ? 18 : root.statusStyle === "monochrome" ? 12 : 15
         source: root.imageSource
         fillMode: Image.PreserveAspectFit
         sourceSize.width: Math.round(width * Screen.devicePixelRatio)
@@ -158,8 +159,8 @@ Item {
     anchors.fill: parent
     bar: root.bar
     text: root.iconGlyph
-    iconComponent: root.iconFamily === "glyph" ? null : artwork
-    opticalSize: root.iconFamily === "glyph" ? Style.bar.iconCanvas : 20
+    iconComponent: root.useArtwork ? artwork : null
+    opticalSize: root.useArtwork ? 20 : Style.bar.iconCanvas
     tooltipText: root.tip
     keepSpace: root.showWhenDisconnected
     useActiveColor: false

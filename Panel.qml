@@ -5,6 +5,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Bluetooth
 import qs.Commons
+import qs.Ui
 
 Item {
   id: root
@@ -91,7 +92,7 @@ Item {
       result.push({label: "Manage devices", detail: "Omarchy Bluetooth panel", command: ["omarchy-shell", "shell", "summon", "omarchy.bluetooth"]})
     } else if (page === "style") {
       var styles = [["color", "Red / Green", "Green when connected, red when away"],
-        ["shape", "Outline / Fill", "Artwork fills when connected; no badge"],
+        ["shape", "Outline / Fill", "Stock glyphs use Linework artwork"],
         ["monochrome", "Monochrome Squares", "Filled when connected; outlined when away"]]
       for (var s = 0; s < styles.length; s++)
         result.push({label: styles[s][1] + (currentStyle() === styles[s][0] ? " ✓" : ""),
@@ -218,22 +219,25 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
-    Rectangle { anchors.fill: parent; color: Color.menu.scrim }
     MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
 
-    Rectangle {
-      width: Math.min(420, panel.width - 32)
-      height: Math.min(80 + rowsColumn.implicitHeight + (root.actionMessage ? 24 : 0), panel.height - 80)
+    BorderSurface {
+      width: Math.min(Style.space(300), panel.width - Style.gapsOut * 2)
+      height: Math.min(Style.spacing.panelPadding * 2 + Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md + rowsColumn.implicitHeight + (root.actionMessage ? Style.space(24) : 0), panel.height - Style.gapsOut * 2)
       anchors.centerIn: parent
-      radius: 12
+      radius: Style.cornerRadius
       color: Color.menu.background
-      border.color: Color.menu.border
-      border.width: 1
+      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
+      padding: Style.spacing.panelPadding
 
       MouseArea { anchors.fill: parent; onClicked: {} }
       Item {
         id: keyCatcher
         anchors.fill: parent
+        anchors.topMargin: parent.contentTopInset
+        anchors.rightMargin: parent.contentRightInset
+        anchors.bottomMargin: parent.contentBottomInset
+        anchors.leftMargin: parent.contentLeftInset
         focus: true
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) root.dismiss()
@@ -246,56 +250,63 @@ Item {
         }
         Text {
           id: heading
-          x: 20; y: 18
+          x: 0; y: 0
           text: root.title()
           color: Color.menu.text
-          font.pixelSize: 19
-          font.bold: true
+          opacity: 0.58
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.heading
         }
         Text {
-          x: parent.width - width - 20; y: 21
+          x: parent.width - width; y: 2
           text: root.page ? "← Back" : "Esc Close"
           color: Color.muted
-          font.pixelSize: 12
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.caption
           MouseArea { anchors.fill: parent; onClicked: root.back() }
         }
         Flickable {
           id: rowFlick
-          x: 12; y: 58
-          width: parent.width - 24
-          height: parent.height - 70 - (root.actionMessage ? 24 : 0)
+          x: 0; y: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md
+          width: parent.width
+          height: parent.height - y - (root.actionMessage ? Style.space(24) : 0)
           contentHeight: rowsColumn.implicitHeight
           clip: true
           Column {
             id: rowsColumn
             width: parent.width
-            spacing: 4
+            spacing: Style.spacing.xs
             Repeater {
               id: rowRepeater
               model: root.rows
-              delegate: Rectangle {
+              delegate: BorderSurface {
                 id: rowItem
                 required property var modelData
                 required property int index
                 width: rowsColumn.width
-                height: modelData.detail ? 56 : 42
-                radius: 7
-                color: root.selectedIndex === index ? Color.menu.border : "transparent"
+                height: modelData.detail ? Math.max(Style.space(58), Style.font.heading + Style.font.bodySmall + Style.spacing.rowPaddingX * 2) : Math.max(Style.space(50), Style.font.body + Style.spacing.rowPaddingX * 2)
+                radius: Style.cornerRadius
+                color: root.selectedIndex === index ? Color.menu.selectedBackground : "transparent"
+                borderSpec: root.selectedIndex === index ? Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0) : Border.none()
                 Text {
-                  x: 12; y: modelData.detail ? 8 : 11
-                  width: parent.width - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 24)
+                  x: Style.space(18); y: modelData.detail ? Style.space(9) : Style.space(16)
+                  width: parent.width - x - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 18)
                   text: modelData.label
-                  color: Color.menu.text
-                  font.pixelSize: 15
+                  color: root.selectedIndex === index ? Color.menu.selectedText : Color.menu.text
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.heading
+                  font.weight: Font.Medium
                   elide: Text.ElideRight
                 }
                 Text {
-                  x: 12; y: 31
-                  width: parent.width - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 24)
+                  x: Style.space(18); y: Style.space(32)
+                  width: parent.width - x - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 18)
                   visible: !!modelData.detail
                   text: modelData.detail || ""
-                  color: Color.muted
-                  font.pixelSize: 12
+                  color: Color.menu.text
+                  opacity: 0.52
+                  font.family: Style.font.menuFamily
+                  font.pixelSize: Style.font.bodySmall
                   elide: Text.ElideRight
                 }
                 Row {
@@ -341,11 +352,12 @@ Item {
           }
         }
         Text {
-          x: 20; y: parent.height - 25
+          x: 0; y: parent.height - Style.space(20)
           text: root.actionMessage
           visible: !!text
           color: Color.muted
-          font.pixelSize: 12
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }
