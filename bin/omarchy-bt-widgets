@@ -1,0 +1,371 @@
+#!/usr/bin/env bash
+# Installed by omarchy-bluetooth-widgets.
+set -euo pipefail
+
+config=$HOME/.config/omarchy/shell.json
+address_re='^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+PLUGIN_ID='redeye1011.bluetooth-status'
+
+die() { printf 'omarchy-bt-widgets: %s\n' "$*" >&2; exit 1; }
+notice() {
+  if command -v notify-send >/dev/null; then notify-send 'Bluetooth Status' "$*" || true; fi
+  printf '%s\n' "$*" >&2
+}
+check_slot() {
+  case ${1:-} in
+    speaker|earbuds|mouse|keyboard) ;;
+    *) die 'slot must be speaker, earbuds, mouse, or keyboard' ;;
+  esac
+}
+valid_address() { [[ ${1:-} =~ $address_re ]]; }
+lock_settings() {
+  local runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+  [[ -d $runtime && -O $runtime && $(stat -c %a -- "$runtime") == 700 ]] || die 'private runtime directory unavailable'
+  exec {settings_lock}>>"$runtime/omarchy-bt-widgets-settings-$(id -u).lock"
+  flock -x "$settings_lock"
+}
+unlock_settings() { exec {settings_lock}>&-; }
+setting() {
+  local key="$1" fallback="${2:-}"
+  [[ -f $config ]] || return 0
+  jq -r --arg id "$PLUGIN_ID" --arg key "$key" --arg fallback "$fallback" '[.bar.layout.left[]?, .bar.layout.center[]?, .bar.layout.right[]?]
+    | map(select(type == "object" and .id == $id)) | (.[0] // {}) | if has($key) and .[$key] != null then .[$key] else $fallback end' "$config"
+}
+binding() { setting "${1}Address"; }
+device_info() { timeout 3s bluetoothctl info "$1" 2>/dev/null || true; }
+paired() { [[ $(device_info "$1") == *'Paired: yes'* ]]; }
+connected() { [[ $(device_info "$1") == *'Connected: yes'* ]]; }
+adapter_on() { [[ $(timeout 3s bluetoothctl show 2>/dev/null || true) == *'Powered: yes'* ]]; }
+device_name() {
+  local addr=$1 info name alias
+  info=$(device_info "$addr")
+  alias=$(printf '%s\n' "$info" | sed -nE 's/^[[:space:]]*Alias:[[:space:]]*(.+)$/\1/p' | head -n 1)
+  name=$(printf '%s\n' "$info" | sed -nE 's/^[[:space:]]*Name:[[:space:]]*(.+)$/\1/p' | head -n 1)
+  if [[ -n $alias ]]; then
+    printf '%s' "$alias"
+    return
+  fi
+  if [[ -n $name ]]; then
+    printf '%s' "$name"
+    return
+  fi
+  local dev_line
+  dev_line=$(timeout 3s bluetoothctl devices 2>/dev/null | grep -F "$addr" | head -n 1 || true)
+  if [[ $dev_line =~ ^Device[[:space:]]+([^[:space:]]+)[[:space:]]+(.+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[2]}"
+  fi
+}
+device_matches_name() {
+  local target_name=$1 addr=$2 slot=$3 name target_lower name_lower
+  name=$(device_name "$addr")
+  [[ -n $target_name && -n $name ]] || return 1
+  target_lower=${target_name,,}
+  name_lower=${name,,}
+  [[ $name_lower == "$target_lower" ]] && return 0
+  # Some mice change only the Bluetooth profile suffix when re-paired.
+  [[ $slot == mouse ]] || return 1
+  [[ $target_lower =~ [[:space:]](3|5)\.0$ && $name_lower =~ [[:space:]](3|5)\.0$ &&
+     ${target_lower% *} == "${name_lower% *}" ]]
+}
+device_matches_slot() {
+  local slot=$1 addr=$2 info name
+  info=$(device_info "$addr")
+  name=$(device_name "$addr")
+  local name_lower="${name,,}"
+  local info_lower="${info,,}"
+
+  case $slot in
+    mouse)
+      [[ $info_lower == *'icon: input-mouse'* || $info_lower == *'icon: mouse'* ||
+         $name_lower == *'mouse'* || $name_lower == *'trackpad'* ]]
+      ;;
+    keyboard)
+      [[ $info_lower == *'icon: input-keyboard'* || $info_lower == *'icon: keyboard'* ||
+         $name_lower == *'keyboard'* || $name_lower == *'keys'* ]]
+      ;;
+    speaker)
+      [[ $info_lower == *'icon: audio-card'* || $info_lower == *'icon: audio-speaker'* ||
+         $name_lower == *'speaker'* || $name_lower == *'soundbar'* ]]
+      ;;
+    earbuds)
+      [[ $info_lower == *'icon: audio-head'* ||
+         $name_lower == *'earbud'* || $name_lower == *'buds'* ||
+         $name_lower == *'headphone'* || $name_lower == *'headset'* ||
+         $name_lower == *'airpod'* ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+status() {
+  local address
+  address=$(binding "$1")
+  if [[ -z $address ]]; then printf 'Unconfigured'; return; fi
+  if ! valid_address "$address"; then printf 'Invalid address'; return; fi
+  if ! command -v bluetoothctl >/dev/null || [[ -z $(timeout 3s bluetoothctl show 2>/dev/null || true) ]]; then
+    printf 'Bluetooth unavailable'; return
+  fi
+  if ! adapter_on; then printf 'Adapter off'; return; fi
+  if connected "$address"; then printf 'Connected · %s' "$address"; return; fi
+  if paired "$address"; then printf 'Disconnected · %s' "$address"; return; fi
+  printf 'Not paired here · %s' "$address"
+}
+set_binding() {
+  local slot=$1 address=${2:-} name=${3:-}
+  check_slot "$slot"
+  valid_address "$address" || die 'invalid Bluetooth address'
+  paired "$address" || die 'device must be paired on this machine first'
+  [[ -n $name ]] || name=$(device_name "$address")
+  lock_settings
+  omarchy bar set "$PLUGIN_ID" "${slot}Address" "$address" >/dev/null
+  if [[ -n $name ]]; then
+    omarchy bar set "$PLUGIN_ID" "${slot}NameHint" "$name" >/dev/null
+  fi
+  unlock_settings
+  notice "${slot^} tracks $address"
+}
+rebind() {
+  local slot=$1
+  check_slot "$slot"
+
+  # If old address is still valid and paired, return immediately without overwriting
+  local current_addr
+  current_addr=$(binding "$slot")
+  if [[ -n $current_addr ]] && valid_address "$current_addr" && paired "$current_addr"; then
+    printf '%s\n' "$current_addr"
+    return 0
+  fi
+
+  if ! command -v bluetoothctl >/dev/null || [[ -z $(timeout 3s bluetoothctl show 2>/dev/null || true) ]]; then
+    die 'Bluetooth unavailable'
+  fi
+  if ! adapter_on; then
+    die 'Adapter off'
+  fi
+
+  local prev_hint
+  prev_hint=$(setting "${slot}NameHint")
+
+  local raw_devices
+  raw_devices=$(timeout 3s bluetoothctl devices 2>/dev/null || true)
+  local -A seen_addrs=()
+  local candidates=()
+
+  while read -r _dev addr _rest; do
+    [[ ${_dev:-} == "Device" ]] || continue
+    valid_address "$addr" || continue
+    [[ -z ${seen_addrs[$addr]:-} ]] || continue
+    seen_addrs[$addr]=1
+
+    paired "$addr" || continue
+    connected "$addr" || continue
+
+    local other_slot bound_other=false
+    for other_slot in speaker earbuds mouse keyboard; do
+      if [[ $other_slot != "$slot" && $(binding "$other_slot") == "$addr" ]]; then
+        bound_other=true
+        break
+      fi
+    done
+    [[ $bound_other == false ]] || continue
+
+    candidates+=("$addr")
+  done <<< "$raw_devices"
+
+  local target_addr=""
+  local matched=()
+
+  if [[ -n $prev_hint ]]; then
+    for addr in "${candidates[@]}"; do
+      if device_matches_name "$prev_hint" "$addr" "$slot"; then
+        matched+=("$addr")
+      fi
+    done
+    if (( ${#matched[@]} == 1 )); then
+      target_addr="${matched[0]}"
+    elif (( ${#matched[@]} > 1 )); then
+      die "ambiguous candidates matching previous nameHint '$prev_hint'"
+    else
+      die "no connected replacement found matching '$prev_hint'"
+    fi
+  else
+    # Type-only fallback when no nameHint was recorded
+    for addr in "${candidates[@]}"; do
+      if device_matches_slot "$slot" "$addr"; then
+        matched+=("$addr")
+      fi
+    done
+    if (( ${#matched[@]} == 1 )); then
+      target_addr="${matched[0]}"
+    elif (( ${#matched[@]} > 1 )); then
+      die "ambiguous candidates matching $slot type"
+    else
+      die "no connected replacement found for $slot"
+    fi
+  fi
+
+  local name
+  name=$(device_name "$target_addr")
+  [[ -n $name ]] || name="$prev_hint"
+
+  lock_settings
+  omarchy bar set "$PLUGIN_ID" "${slot}Address" "$target_addr" >/dev/null
+  if [[ -n $name ]]; then
+    omarchy bar set "$PLUGIN_ID" "${slot}NameHint" "$name" >/dev/null
+  fi
+  unlock_settings
+
+  notice "${slot^} rebound to $target_addr${name:+ ($name)}"
+  printf '%s\n' "$target_addr"
+}
+set_style() {
+  case ${1:-} in color|shape|monochrome) ;; *) die 'invalid status style' ;; esac
+  lock_settings
+  omarchy bar set "$PLUGIN_ID" statusStyle "$1" >/dev/null
+  unlock_settings
+}
+set_icon() {
+  local slot=$1
+  check_slot "$slot"
+  [[ -n ${2:-} && ${#2} -le 8 ]] || die 'invalid icon glyph'
+  lock_settings
+  omarchy bar set "$PLUGIN_ID" "${slot}Icon" "$2" >/dev/null
+  omarchy bar set "$PLUGIN_ID" "${slot}IconFamily" glyph >/dev/null
+  unlock_settings
+}
+set_family() {
+  local slot glyph
+  [[ ${1:-} == all ]] || check_slot "$1"
+  case ${2:-} in a|b|c|glyph) ;; *) die 'invalid icon family' ;; esac
+  lock_settings
+  if [[ $1 == all ]]; then
+    for slot in speaker earbuds mouse keyboard; do
+      if [[ $2 == glyph ]]; then
+        case $slot in
+          speaker) glyph='󰓃' ;; earbuds) glyph='󰋎' ;;
+          mouse) glyph='󰍽' ;; keyboard) glyph='󰌌' ;;
+        esac
+        omarchy bar set "$PLUGIN_ID" "${slot}Icon" "$glyph" >/dev/null
+      fi
+      omarchy bar set "$PLUGIN_ID" "${slot}IconFamily" "$2" >/dev/null
+    done
+  else
+    omarchy bar set "$PLUGIN_ID" "${1}IconFamily" "$2" >/dev/null
+  fi
+  unlock_settings
+}
+toggle_visibility() {
+  local slot=$1 visibility
+  check_slot "$slot"
+  lock_settings
+  visibility=$(setting "${slot}ShowWhenDisconnected" true)
+  if [[ $visibility == false ]]; then visibility=true; else visibility=false; fi
+  omarchy bar set "$PLUGIN_ID" "${slot}ShowWhenDisconnected" "$visibility" --json >/dev/null
+  unlock_settings
+}
+open_menu() {
+  omarchy-shell shell summon "$PLUGIN_ID" '{}' >/dev/null
+}
+connection_check() {
+  local current
+  current=$(status "$1")
+  if [[ $2 == connected ]]; then [[ $current == Connected* ]]
+  else [[ $current != Connected* ]]
+  fi
+}
+run_selfcheck() {
+  local test_dir
+  test_dir=$(mktemp -d /tmp/bt-selfcheck-XXXXXX)
+  local mock_bin="$test_dir/bin"
+  local mock_home="$test_dir/home"
+  mkdir -p "$mock_bin" "$mock_home/.config/omarchy"
+
+  cat >"$mock_bin/omarchy" <<'MOCK'
+#!/usr/bin/env bash
+file=$HOME/.config/omarchy/shell.json
+if [[ $1 == bar && $2 == set ]]; then
+  jq --arg id "$3" --arg key "$4" --arg value "$5" --argjson is_json "$([[ ${6:-} == --json ]] && echo true || echo false)" '
+    .bar.layout.right |= map(if .id == $id then .[$key] = (if $is_json then ($value | fromjson) else $value end) else . end)' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+fi
+MOCK
+
+  cat >"$mock_bin/bluetoothctl" <<'MOCK'
+#!/usr/bin/env bash
+case "$1" in
+  show) echo 'Powered: yes' ;;
+  devices) printf '%s\n' 'Device 11:22:33:44:55:66 MX Master' 'Device 22:33:44:55:66:77 MX Keys' 'Device 33:44:55:66:77:88 Other Mouse' 'Device 44:55:66:77:88:99 Demo Mouse 3.0' ;;
+  info)
+    case "$2" in
+      11:22:33:44:55:66) printf '%s\n' 'Paired: yes' 'Connected: yes' 'Icon: input-mouse' 'Name: MX Master' ;;
+      22:33:44:55:66:77) printf '%s\n' 'Paired: yes' 'Connected: yes' 'Icon: input-keyboard' 'Name: MX Keys' ;;
+      33:44:55:66:77:88) printf '%s\n' 'Paired: yes' 'Connected: yes' 'Icon: input-mouse' 'Name: Other Mouse' ;;
+      44:55:66:77:88:99) printf '%s\n' 'Paired: yes' 'Connected: yes' 'Icon: input-mouse' 'Name: Demo Mouse 3.0' ;;
+      99:99:99:99:99:99) printf '%s\n' 'Paired: yes' 'Connected: no' 'Icon: input-mouse' 'Name: Old Mouse' ;;
+      *) exit 1 ;;
+    esac ;;
+esac
+MOCK
+  chmod +x "$mock_bin/omarchy" "$mock_bin/bluetoothctl"
+
+  local script
+  script=$(realpath "${BASH_SOURCE[0]}")
+  local cfg="$mock_home/.config/omarchy/shell.json"
+
+  # Case 1: old address still paired (even if disconnected) -> no overwrite
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","mouseAddress":"99:99:99:99:99:99","mouseNameHint":"Old Mouse"}]}}}' >"$cfg"
+  local out
+  out=$(PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind mouse)
+  [[ $out == "99:99:99:99:99:99" ]] || { echo "Case 1 failed" >&2; return 1; }
+  test "$(jq -r '.bar.layout.right[0].mouseAddress' "$cfg")" = "99:99:99:99:99:99"
+
+  # Case 2: old address forgotten, saved nameHint matches replacement -> rebinds
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","mouseAddress":"00:00:00:00:00:00","mouseNameHint":"MX Master"}]}}}' >"$cfg"
+  out=$(PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind mouse)
+  [[ $out == "11:22:33:44:55:66" ]] || { echo "Case 2 failed" >&2; return 1; }
+  test "$(jq -r '.bar.layout.right[0].mouseAddress' "$cfg")" = "11:22:33:44:55:66"
+  test "$(jq -r '.bar.layout.right[0].mouseNameHint' "$cfg")" = "MX Master"
+
+  # Case 3: saved nameHint has no matching candidate -> does not hijack another mouse
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","mouseAddress":"00:00:00:00:00:00","mouseNameHint":"Unrelated Name"}]}}}' >"$cfg"
+  if PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind mouse 2>/dev/null; then
+    echo "Case 3 failed: hijacked without matching nameHint" >&2; return 1
+  fi
+
+  # Case 4: no saved nameHint, unique keyboard -> type-only fallback rebinds keyboard
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","keyboardAddress":"00:00:00:00:00:00"}]}}}' >"$cfg"
+  out=$(PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind keyboard)
+  [[ $out == "22:33:44:55:66:77" ]] || { echo "Case 4 failed" >&2; return 1; }
+  test "$(jq -r '.bar.layout.right[0].keyboardAddress' "$cfg")" = "22:33:44:55:66:77"
+  test "$(jq -r '.bar.layout.right[0].keyboardNameHint' "$cfg")" = "MX Keys"
+
+  # Case 5: no saved nameHint, two connected mice -> ambiguous, fails without binding
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","mouseAddress":"00:00:00:00:00:00"}]}}}' >"$cfg"
+  if PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind mouse 2>/dev/null; then
+    echo "Case 5 failed: resolved ambiguous mice without nameHint" >&2; return 1
+  fi
+
+  # Case 6: the same mouse reappears with a new address and Bluetooth profile suffix
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status","mouseAddress":"00:00:00:00:00:00","mouseNameHint":"Demo Mouse 5.0"}]}}}' >"$cfg"
+  out=$(PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" rebind mouse)
+  [[ $out == "44:55:66:77:88:99" ]] || { echo "Case 6 failed" >&2; return 1; }
+  test "$(jq -r '.bar.layout.right[0].mouseNameHint' "$cfg")" = "Demo Mouse 3.0"
+
+  # Cleanup
+  rm -f "$mock_bin/"* "$cfg"*
+  rmdir "$mock_bin" "$mock_home/.config/omarchy" "$mock_home/.config" "$mock_home" "$test_dir"
+  printf 'selfcheck: all rebind checks passed\n'
+}
+
+case ${1:-} in
+  menu) open_menu ;;
+  status) check_slot "${2:-}"; status "$2"; printf '\n' ;;
+  bind) set_binding "${2:-}" "${3:-}" "${4:-}" ;;
+  rebind) rebind "${2:-}" ;;
+  style) set_style "${2:-}" ;;
+  icon) set_icon "${2:-}" "${3:-}" ;;
+  family) set_family "${2:-}" "${3:-}" ;;
+  visibility) toggle_visibility "${2:-}" ;;
+  connected|not-connected) check_slot "${2:-}"; connection_check "$2" "$1" ;;
+  selfcheck) run_selfcheck ;;
+  *) die 'usage: omarchy-bt-widgets menu | status SLOT | bind SLOT ADDRESS [NAME] | rebind SLOT | style color|shape|monochrome | icon SLOT GLYPH | family SLOT|all glyph|a|b|c | visibility SLOT' ;;
+esac

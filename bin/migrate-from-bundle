@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Move settings from the pre-release five-plugin bundle to the native plugin.
+set -euo pipefail
+
+plugin=redeye1011.bluetooth-status
+config=$HOME/.config/omarchy/shell.json
+plugins_dir=$HOME/.config/omarchy/plugins
+repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+
+[[ -f $plugins_dir/$plugin/manifest.json ]] || { echo "Install $plugin first" >&2; exit 1; }
+[[ -f $config ]] || { echo "Missing $config" >&2; exit 1; }
+omarchy-shell shell ping >/dev/null || { echo 'Omarchy shell is not running' >&2; exit 1; }
+jq -e --arg id "$plugin" '[.bar.layout.left[]?,.bar.layout.center[]?,.bar.layout.right[]?] | any(.id == $id)' "$config" >/dev/null || {
+  echo "Enable $plugin on the bar first" >&2; exit 1;
+}
+if ! jq -e '[.bar.layout.left[]?,.bar.layout.center[]?,.bar.layout.right[]?]
+  | any(.id == "om.bt-speaker" or .id == "om.bt-earbuds" or .id == "om.bt-mouse" or .id == "om.bt-keyboard")' "$config" >/dev/null; then
+  echo 'No earlier Bluetooth Status bar entries to migrate'
+  exit 0
+fi
+
+for slot in speaker earbuds mouse keyboard settings; do
+  old=$plugins_dir/om.bt-$slot
+  if [[ -e $old && ! -f $old/.omarchy-bt-widgets-managed ]]; then
+    echo "Refusing to remove unowned plugin: $old" >&2
+    exit 1
+  fi
+done
+
+backup=$config.bak.$(date +%Y%m%d%H%M%S)
+cp -p -- "$config" "$backup"
+echo "Backup: $backup"
+
+for slot in speaker earbuds mouse keyboard; do
+  old_row=$(jq -c --arg id "om.bt-$slot" '[.bar.layout.left[]?,.bar.layout.center[]?,.bar.layout.right[]?]
+    | map(select(type == "object" and .id == $id)) | .[0] // empty' "$backup")
+  [[ -n $old_row ]] || continue
+  for field in address iconFamily icon nameHint; do
+    if jq -e --arg field "$field" 'has($field)' <<<"$old_row" >/dev/null; then
+      value=$(jq -r --arg field "$field" '.[$field]' <<<"$old_row")
+      key=${field^}
+      omarchy bar set "$plugin" "$slot$key" "$value" >/dev/null
+    fi
+  done
+  visible=$(jq -r 'if has("showWhenDisconnected") then .showWhenDisconnected else true end' <<<"$old_row")
+  omarchy bar set "$plugin" "${slot}ShowWhenDisconnected" "$visible" --json >/dev/null
+done
+style=$(jq -r '[.bar.layout.left[]?,.bar.layout.center[]?,.bar.layout.right[]?]
+  | map(select(.id == "om.bt-speaker")) | .[0].statusStyle // "color"' "$backup")
+omarchy bar set "$plugin" statusStyle "$style" >/dev/null
+
+"$repo/bin/menu-extension" add
+for slot in speaker earbuds mouse keyboard settings; do
+  [[ ! -e $plugins_dir/om.bt-$slot ]] || omarchy plugin remove "om.bt-$slot" --yes
+done
+old_helper=$HOME/.local/bin/omarchy-bt-widgets
+if [[ -f $old_helper ]] && head -n 3 "$old_helper" | grep -q 'omarchy-bluetooth-widgets'; then
+  mv -- "$old_helper" "$old_helper.removed.$(date +%Y%m%d%H%M%S)"
+fi
+echo 'Native Bluetooth Status plugin is ready; previous plugin folders were backed up.'

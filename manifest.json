@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "redeye1011.bluetooth-status",
+  "name": "Bluetooth Status",
+  "version": "1.0.0",
+  "author": "redeye1011",
+  "description": "One bar slot showing speaker, earbuds, mouse, and keyboard Bluetooth connection status, each independently hideable",
+  "kinds": [
+    "bar-widget",
+    "panel"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml",
+    "panel": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Bluetooth Status",
+    "description": "Shows whether your bound Bluetooth speaker, earbuds, mouse, and keyboard are connected to this machine",
+    "category": "Bluetooth",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "statusStyle": "color",
+      "speakerAddress": "",
+      "speakerIcon": "󰓃",
+      "speakerIconFamily": "glyph",
+      "speakerShowWhenDisconnected": false,
+      "earbudsAddress": "",
+      "earbudsIcon": "󰋎",
+      "earbudsIconFamily": "glyph",
+      "earbudsShowWhenDisconnected": false,
+      "mouseAddress": "",
+      "mouseIcon": "󰍽",
+      "mouseIconFamily": "glyph",
+      "mouseShowWhenDisconnected": true,
+      "keyboardAddress": "",
+      "keyboardIcon": "󰌌",
+      "keyboardIconFamily": "glyph",
+      "keyboardShowWhenDisconnected": true
+    }
+  }
+}
