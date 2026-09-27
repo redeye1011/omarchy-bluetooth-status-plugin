@@ -21,6 +21,7 @@
     "defaultSection": "right",
     "defaults": {
       "statusStyle": "color",
+      "iconOrder": "speaker,earbuds,mouse,keyboard",
       "speakerAddress": "",
       "speakerIcon": "󰓃",
       "speakerIconFamily": "glyph",

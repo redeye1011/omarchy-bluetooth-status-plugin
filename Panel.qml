@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Bluetooth
 import qs.Commons
 import qs.Ui
+import "IconOrder.js" as Order
 
 Item {
   id: root
@@ -17,6 +18,7 @@ Item {
   property var settings: ({})
   readonly property string helperPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/redeye1011.bluetooth-status/bin/omarchy-bt-widgets"
   readonly property var widgetEntry: settings["redeye1011.bluetooth-status"] || ({})
+  readonly property var iconOrder: Order.normalize(widgetEntry.iconOrder)
   readonly property var devices: Bluetooth.devices ? Bluetooth.devices.values : []
   readonly property var slots: ["speaker", "earbuds", "mouse", "keyboard"]
   readonly property var defaults: ({speaker: "󰓃", earbuds: "󰋎", mouse: "󰍽", keyboard: "󰌌"})
@@ -73,6 +75,7 @@ Item {
     var parts = page.split(".")
     if (parts[0] === "style") return "Status style"
     if (parts[0] === "icons") return "Icon set"
+    if (parts[0] === "order") return parts[1] ? parts[1][0].toUpperCase() + parts[1].slice(1) + " position" : "Icon order"
     return parts[0][0].toUpperCase() + parts[0].slice(1) + (parts[1] ? " · " + parts[1][0].toUpperCase() + parts[1].slice(1) : "")
   }
   function buildRows() {
@@ -84,6 +87,7 @@ Item {
       var curFam = currentFamily()
       var famName = curFam === "glyph" ? "Omarchy defaults" : (familyNames[curFam] || curFam)
       result.push({label: "Icon set", detail: famName, next: "icons"})
+      result.push({label: "Icon order", detail: "Arrange the four bar icons", next: "order"})
       for (var i = 0; i < slots.length; i++) {
         var slot = slots[i], current = entry(slot), found = device(current.address)
         var state = !current.address ? "Choose a device" : found && found.connected ? "Connected" : "Not connected here"
@@ -98,6 +102,18 @@ Item {
         result.push({label: styles[s][1] + (currentStyle() === styles[s][0] ? " ✓" : ""),
           detail: styles[s][2],
           command: [root.helperPath, "style", styles[s][0]]})
+    } else if (page === "order") {
+      for (var o = 0; o < iconOrder.length; o++) {
+        var orderedSlot = iconOrder[o]
+        result.push({label: orderedSlot[0].toUpperCase() + orderedSlot.slice(1),
+          detail: "Position " + (o + 1) + " of 4", next: "order." + orderedSlot})
+      }
+    } else if (page.slice(0, 6) === "order.") {
+      var movingSlot = page.slice(6), position = iconOrder.indexOf(movingSlot)
+      if (position > 0) result.push({label: "Move left", detail: "Before " + iconOrder[position - 1],
+        command: [root.helperPath, "order", Order.move(iconOrder.join(","), movingSlot, -1)]})
+      if (position >= 0 && position < iconOrder.length - 1) result.push({label: "Move right", detail: "After " + iconOrder[position + 1],
+        command: [root.helperPath, "order", Order.move(iconOrder.join(","), movingSlot, 1)]})
     } else if (page === "icons") {
       var curFam = currentFamily()
       var families = ["a", "b", "c"]
@@ -222,8 +238,9 @@ Item {
     MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
 
     BorderSurface {
+      id: card
       width: Math.min(Style.space(300), panel.width - Style.gapsOut * 2)
-      height: Math.min(Style.spacing.panelPadding * 2 + Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md + rowsColumn.implicitHeight + (root.actionMessage ? Style.space(24) : 0), panel.height - Style.gapsOut * 2)
+      height: Math.min(card.contentTopInset + card.contentBottomInset + Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md + rowsColumn.implicitHeight + (root.actionMessage ? Style.space(24) : 0), panel.height - Style.gapsOut * 2)
       anchors.centerIn: parent
       radius: Style.cornerRadius
       color: Color.menu.background

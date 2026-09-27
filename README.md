@@ -34,6 +34,8 @@ This creates one search result for the panel; individual settings are inside it.
 
 The panel offers a shared **Status style** and **Icon set**, plus an **Icon** choice for each device. If individual choices differ, the Icon set summary reads **Mixed**. **Omarchy defaults** restores the original glyph for each slot. The Classic, Linework, and Modern sets each include base, filled, and outlined artwork for all four devices.
 
+The bar shows each device as its own spaced icon. Open **Icon order** to move any icon left or right; the four icons can be arranged in any order. Omarchy still treats the group as one bar widget, which you can drag to a different place on the bar.
+
 | Status style | Connected | Disconnected | Unconfigured |
 | --- | --- | --- | --- |
 | Red / Green | Theme green icon | Theme urgent/red icon | Muted icon |

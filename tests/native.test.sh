@@ -16,7 +16,8 @@ if [[ -x $lint ]]; then
   "$lint" "$repo/BarWidget.qml" "$repo/SlotIcon.qml" "$repo/Panel.qml" >/dev/null 2>&1
 fi
 if command -v tesseract >/dev/null; then
-  for preview in "$repo/preview.png" "$repo/preview-device.png"; do
+  for preview in "$repo/preview.png" "$repo/preview-icons.png"; do
+    test -s "$preview"
     if tesseract "$preview" stdout 2>/dev/null | rg -qi '([0-9a-f]{2}:){5}[0-9a-f]{2}'; then
       echo "Bluetooth address visible in $preview" >&2
       exit 1

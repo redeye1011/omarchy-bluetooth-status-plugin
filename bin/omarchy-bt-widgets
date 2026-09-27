@@ -223,6 +223,12 @@ set_style() {
   omarchy bar set "$PLUGIN_ID" statusStyle "$1" >/dev/null
   unlock_settings
 }
+set_order() {
+  jq -e -n --arg order "${1:-}" '($order | split(",") | sort) == ["earbuds", "keyboard", "mouse", "speaker"]' >/dev/null || die 'icon order must contain each slot once'
+  lock_settings
+  omarchy bar set "$PLUGIN_ID" iconOrder "$1" >/dev/null
+  unlock_settings
+}
 set_icon() {
   local slot=$1
   check_slot "$slot"
@@ -350,6 +356,14 @@ MOCK
   [[ $out == "44:55:66:77:88:99" ]] || { echo "Case 6 failed" >&2; return 1; }
   test "$(jq -r '.bar.layout.right[0].mouseNameHint' "$cfg")" = "Demo Mouse 3.0"
 
+  # Icon order accepts every slot exactly once.
+  printf '{"bar":{"layout":{"right":[{"id":"redeye1011.bluetooth-status"}]}}}' >"$cfg"
+  PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" order keyboard,mouse,earbuds,speaker
+  test "$(jq -r '.bar.layout.right[0].iconOrder' "$cfg")" = keyboard,mouse,earbuds,speaker
+  if PATH="$mock_bin:$PATH" HOME="$mock_home" "$script" order keyboard,mouse,mouse,speaker 2>/dev/null; then
+    echo "Icon order accepted a duplicate slot" >&2; return 1
+  fi
+
   # Cleanup
   rm -f "$mock_bin/"* "$cfg"*
   rmdir "$mock_bin" "$mock_home/.config/omarchy" "$mock_home/.config" "$mock_home" "$test_dir"
@@ -362,10 +376,11 @@ case ${1:-} in
   bind) set_binding "${2:-}" "${3:-}" "${4:-}" ;;
   rebind) rebind "${2:-}" ;;
   style) set_style "${2:-}" ;;
+  order) set_order "${2:-}" ;;
   icon) set_icon "${2:-}" "${3:-}" ;;
   family) set_family "${2:-}" "${3:-}" ;;
   visibility) toggle_visibility "${2:-}" ;;
   connected|not-connected) check_slot "${2:-}"; connection_check "$2" "$1" ;;
   selfcheck) run_selfcheck ;;
-  *) die 'usage: omarchy-bt-widgets menu | status SLOT | bind SLOT ADDRESS [NAME] | rebind SLOT | style color|shape|monochrome | icon SLOT GLYPH | family SLOT|all glyph|a|b|c | visibility SLOT' ;;
+  *) die 'usage: omarchy-bt-widgets menu | status SLOT | bind SLOT ADDRESS [NAME] | rebind SLOT | style color|shape|monochrome | order SLOT,SLOT,SLOT,SLOT | icon SLOT GLYPH | family SLOT|all glyph|a|b|c | visibility SLOT' ;;
 esac
