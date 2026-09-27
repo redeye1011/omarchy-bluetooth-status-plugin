@@ -4,9 +4,9 @@ One Omarchy bar plugin for a Bluetooth **speaker**, **earbuds**, **mouse**, and 
 
 ![Bluetooth Status settings panel](preview.png)
 
-![Mouse visibility and tracked-device settings](preview-device.png)
+![Bluetooth Status icon set choices](preview-icons.png)
 
-The previews show only the running Omarchy plugin panel. Device names were anonymized and addresses were removed for publication.
+The previews show the centered Omarchy plugin panel and icon choices without device names or Bluetooth addresses.
 
 ## Install
 
