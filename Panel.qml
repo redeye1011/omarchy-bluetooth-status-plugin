@@ -16,6 +16,7 @@ Item {
   property int selectedIndex: 0
   property string actionMessage: ""
   property var settings: ({})
+  property string returnMenu: "root"
   readonly property string helperPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/redeye1011.bluetooth-status/bin/omarchy-bt-widgets"
   readonly property var widgetEntry: settings["redeye1011.bluetooth-status"] || ({})
   readonly property var iconOrder: Order.normalize(widgetEntry.iconOrder)
@@ -160,8 +161,17 @@ Item {
     return result
   }
   function navigate(next) { page = next; selectedIndex = 0; rowFlick.contentY = 0; actionMessage = "" }
+  function returnToOmarchyMenu() {
+    var targetMenu = root.returnMenu || "root"
+    dismiss()
+    Quickshell.execDetached(["omarchy-shell", "shell", "summon", "omarchy.menu", JSON.stringify({menu: targetMenu})])
+  }
   function back() {
-    if (!page) { dismiss(); return }
+    if (!page) {
+      if (root.returnMenu) returnToOmarchyMenu()
+      else dismiss()
+      return
+    }
     var parts = page.split(".") 
     navigate(parts.length === 1 ? "" : parts[0])
   }
@@ -179,12 +189,19 @@ Item {
       settingProcess.running = true
     }
   }
-  function open(_) {
+  function open(rawPayload) {
     page = ""
     selectedIndex = 0
     opened = true
     rowFlick.contentY = 0
     actionMessage = ""
+    returnMenu = "root"
+    if (rawPayload) {
+      try {
+        var payload = typeof rawPayload === "string" ? JSON.parse(rawPayload) : rawPayload
+        if (payload && payload.returnMenu !== undefined) returnMenu = String(payload.returnMenu || "")
+      } catch (e) {}
+    }
     configFile.reload()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
@@ -193,7 +210,7 @@ Item {
     opened = false
     if (shell && typeof shell.hide === "function") shell.hide("redeye1011.bluetooth-status")
   }
-  function toggle() { if (opened) dismiss(); else open("{}") }
+  function toggle(payloadJson) { if (opened) dismiss(); else open(payloadJson || "{}") }
 
   Process {
     id: settingProcess
@@ -276,7 +293,7 @@ Item {
         }
         Text {
           x: parent.width - width; y: 2
-          text: root.page ? "← Back" : "Esc Close"
+          text: (root.page || root.returnMenu) ? "← Back" : "Esc Close"
           color: Color.muted
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.caption
