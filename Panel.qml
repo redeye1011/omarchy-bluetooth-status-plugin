@@ -17,6 +17,27 @@ Item {
   property string actionMessage: ""
   property var settings: ({})
   property string returnMenu: "root"
+
+  readonly property color background: Color.menu.background
+  readonly property color foreground: Color.menu.text
+  readonly property color border: Color.menu.border
+  readonly property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
+  readonly property color scrim: Color.menu.scrim
+  readonly property color selectedBackground: Color.menu.selectedBackground
+  readonly property color selectedText: Color.menu.selectedText
+  readonly property color selectedBorder: Color.menu.selectedBorder
+  readonly property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", selectedBorder, 0)
+  readonly property real rowReservedBorderLeft: Border.left(selectedBorderSpec)
+  readonly property real rowReservedBorderRight: Border.right(selectedBorderSpec)
+  readonly property int cornerRadius: Style.cornerRadius
+  readonly property int contentMargin: Style.spacing.panelPadding
+  readonly property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
+  readonly property int contentSpacing: Style.spacing.md
+  readonly property int baseRowHeight: Math.max(Style.space(50), Style.font.body + Style.spacing.rowPaddingX * 2)
+  readonly property int detailRowHeight: Math.max(Style.space(58), Style.font.body + Style.font.caption + Style.spacing.rowPaddingX * 2)
+  readonly property int rowSpacing: Style.spacing.xs
+  readonly property string fontFamily: Style.font.menuFamily
+
   readonly property string helperPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/redeye1011.bluetooth-status/bin/omarchy-bt-widgets"
   readonly property var widgetEntry: settings["redeye1011.bluetooth-status"] || ({})
   readonly property var iconOrder: Order.normalize(widgetEntry.iconOrder)
@@ -29,14 +50,11 @@ Item {
     mouse: ["󰍽 Omarchy default", "󰣌 Pointer", "󰂯 Radio"],
     keyboard: ["󰌌 Omarchy default", "󰥻 Keys", "󰂯 Radio"]})
   readonly property var rows: buildRows()
+
   onRowsChanged: selectedIndex = Math.min(selectedIndex, Math.max(0, rows.length - 1))
-  onSelectedIndexChanged: Qt.callLater(function() {
-    var row = rowRepeater.itemAt(root.selectedIndex)
-    if (!row) return
-    if (row.y < rowFlick.contentY) rowFlick.contentY = row.y
-    else if (row.y + row.height > rowFlick.contentY + rowFlick.height)
-      rowFlick.contentY = row.y + row.height - rowFlick.height
-  })
+  onSelectedIndexChanged: {
+    if (resultList) resultList.positionViewAtIndex(selectedIndex, ListView.Contain)
+  }
 
   function entry(slot) {
     var w = widgetEntry
@@ -160,7 +178,54 @@ Item {
     }
     return result
   }
-  function navigate(next) { page = next; selectedIndex = 0; rowFlick.contentY = 0; actionMessage = "" }
+
+  function rowHeightForDetail(detail) {
+    return detail ? root.detailRowHeight : root.baseRowHeight
+  }
+
+  function availableRowsHeight() {
+    var top = panel.cardTop >= 0 ? panel.cardTop : Style.gapsOut
+    var available = panel.height - top - Style.gapsOut - root.contentMargin * 2 - root.headerHeight - root.contentSpacing - (root.actionMessage ? Style.space(24) : 0)
+    return Math.min(available, Math.round(panel.height * 0.7))
+  }
+
+  function foldedListHeight(totals, available) {
+    var count = totals.length
+    if (count === 0) return root.baseRowHeight
+    if (totals[count - 1] <= available) return totals[count - 1]
+
+    var peek = Math.round(root.baseRowHeight * 0.55)
+    var full = 0
+    while (full < count && totals[full] <= available) full++
+    while (full > 1 && totals[full - 1] + root.rowSpacing + peek > available) full--
+    if (full < 1) return Math.max(available, root.baseRowHeight)
+
+    return totals[full - 1] + root.rowSpacing + peek
+  }
+
+  function rowListHeight() {
+    if (rows.length === 0) return root.baseRowHeight
+    var totals = []
+    var total = 0
+    for (var i = 0; i < rows.length; i++) {
+      if (i > 0) total += root.rowSpacing
+      total += root.rowHeightForDetail(rows[i].detail)
+      totals.push(total)
+    }
+    return foldedListHeight(totals, availableRowsHeight())
+  }
+
+  readonly property int cardWidth: Math.min(Style.space(300), panel.width - Style.gapsOut * 2)
+  readonly property int visibleRowsHeight: rowListHeight()
+  readonly property int cardHeight: Math.min(root.contentMargin * 2 + root.headerHeight + root.contentSpacing + root.visibleRowsHeight + (root.actionMessage ? Style.space(24) : 0), panel.height - Style.gapsOut * 2)
+
+  function navigate(next) {
+    panel.freezeCardTop()
+    page = next
+    selectedIndex = 0
+    if (resultList) resultList.positionViewAtBeginning()
+    actionMessage = ""
+  }
   function returnToOmarchyMenu() {
     var targetMenu = root.returnMenu || "root"
     dismiss()
@@ -193,7 +258,7 @@ Item {
     page = ""
     selectedIndex = 0
     opened = true
-    rowFlick.contentY = 0
+    if (panel) panel.cardTop = -1
     actionMessage = ""
     returnMenu = "root"
     if (rawPayload) {
@@ -252,109 +317,180 @@ Item {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore
 
-    MouseArea { anchors.fill: parent; onClicked: root.dismiss() }
+    property int cardTop: -1
+    readonly property int centeredTop: Math.max(Style.gapsOut, Math.round((height - root.cardHeight) / 2))
+    readonly property int effectiveCardTop: cardTop >= 0 ? cardTop : centeredTop
+
+    function freezeCardTop() {
+      if (visible && cardTop < 0) {
+        cardTop = effectiveCardTop
+      }
+    }
+
+    onVisibleChanged: if (!visible) cardTop = -1
+
+    Rectangle {
+      anchors.fill: parent
+      color: root.scrim
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      onClicked: root.dismiss()
+    }
 
     BorderSurface {
       id: card
-      width: Math.min(Style.space(300), panel.width - Style.gapsOut * 2)
-      height: Math.min(card.contentTopInset + card.contentBottomInset + Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md + rowsColumn.implicitHeight + (root.actionMessage ? Style.space(24) : 0), panel.height - Style.gapsOut * 2)
-      anchors.centerIn: parent
-      radius: Style.cornerRadius
-      color: Color.menu.background
-      borderSpec: Border.surfaceSpec("menu", "border", Color.menu.border, Math.max(1, Style.space(2)))
-      padding: Style.spacing.panelPadding
+      width: root.cardWidth
+      height: Math.min(root.cardHeight, panel.height - Style.gapsOut - panel.effectiveCardTop)
+      radius: root.cornerRadius
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: panel.effectiveCardTop
+      color: root.background
+      borderSpec: root.borderSpec
+      padding: root.contentMargin
 
       MouseArea { anchors.fill: parent; onClicked: {} }
+
       Item {
         id: keyCatcher
         anchors.fill: parent
-        anchors.topMargin: parent.contentTopInset
-        anchors.rightMargin: parent.contentRightInset
-        anchors.bottomMargin: parent.contentBottomInset
-        anchors.leftMargin: parent.contentLeftInset
         focus: true
+
         Keys.onPressed: function(event) {
           if (event.key === Qt.Key_Escape) root.dismiss()
           else if (event.key === Qt.Key_Left || event.key === Qt.Key_Backspace) root.back()
-          else if (event.key === Qt.Key_Up) root.selectedIndex = Math.max(0, root.selectedIndex - 1)
-          else if (event.key === Qt.Key_Down) root.selectedIndex = Math.min(root.rows.length - 1, root.selectedIndex + 1)
-          else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Right) root.activate(root.selectedIndex)
-          else return
+          else if (event.key === Qt.Key_Up) {
+            root.selectedIndex = Math.max(0, root.selectedIndex - 1)
+            resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+          } else if (event.key === Qt.Key_Down) {
+            root.selectedIndex = Math.min(root.rows.length - 1, root.selectedIndex + 1)
+            resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Right) {
+            root.activate(root.selectedIndex)
+          } else {
+            return
+          }
           event.accepted = true
         }
-        Text {
-          id: heading
-          x: 0; y: 0
-          text: root.title()
-          color: Color.menu.text
-          opacity: 0.58
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.heading
-        }
-        Text {
-          x: parent.width - width; y: 2
-          text: (root.page || root.returnMenu) ? "← Back" : "Esc Close"
-          color: Color.muted
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.caption
-          MouseArea { anchors.fill: parent; onClicked: root.back() }
-        }
-        Flickable {
-          id: rowFlick
-          x: 0; y: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2) + Style.spacing.md
-          width: parent.width
-          height: parent.height - y - (root.actionMessage ? Style.space(24) : 0)
-          contentHeight: rowsColumn.implicitHeight
-          clip: true
-          Column {
-            id: rowsColumn
+
+        Column {
+          anchors.fill: parent
+          anchors.topMargin: card.contentTopInset
+          anchors.rightMargin: card.contentRightInset
+          anchors.bottomMargin: card.contentBottomInset
+          anchors.leftMargin: card.contentLeftInset
+          spacing: root.contentSpacing
+
+          Rectangle {
             width: parent.width
-            spacing: Style.spacing.xs
-            Repeater {
-              id: rowRepeater
+            height: root.headerHeight
+            radius: root.cornerRadius
+            color: "transparent"
+
+            Text {
+              textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.right: backText.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.title()
+              color: root.foreground
+              opacity: 0.58
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.weight: Font.Medium
+              elide: Text.ElideRight
+            }
+
+            Text {
+              id: backText
+              textFormat: Text.PlainText
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: (root.page || root.returnMenu) ? "← Back" : "Esc Close"
+              color: Color.muted
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.back()
+              }
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: root.visibleRowsHeight
+
+            ListView {
+              id: resultList
+              anchors.fill: parent
               model: root.rows
+              clip: true
+              spacing: root.rowSpacing
+              boundsBehavior: Flickable.StopAtBounds
+              currentIndex: root.selectedIndex
+
               delegate: BorderSurface {
                 id: rowItem
                 required property var modelData
                 required property int index
-                width: rowsColumn.width
-                height: modelData.detail ? Math.max(Style.space(58), Style.font.heading + Style.font.bodySmall + Style.spacing.rowPaddingX * 2) : Math.max(Style.space(50), Style.font.body + Style.spacing.rowPaddingX * 2)
-                radius: Style.cornerRadius
-                color: root.selectedIndex === index ? Color.menu.selectedBackground : "transparent"
-                borderSpec: root.selectedIndex === index ? Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0) : Border.none()
-                Text {
-                  x: Style.space(18); y: modelData.detail ? Style.space(9) : Style.space(16)
-                  width: parent.width - x - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 18)
-                  text: modelData.label
-                  color: root.selectedIndex === index ? Color.menu.selectedText : Color.menu.text
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.heading
-                  font.weight: Font.Medium
-                  elide: Text.ElideRight
+                width: ListView.view.width
+                height: root.rowHeightForDetail(modelData.detail)
+                radius: root.cornerRadius
+                color: root.selectedIndex === index ? root.selectedBackground : "transparent"
+                borderSpec: root.selectedIndex === index ? root.selectedBorderSpec : Border.none()
+
+                Column {
+                  id: contentColumn
+                  anchors.left: parent.left
+                  anchors.leftMargin: root.rowReservedBorderLeft + Style.space(18)
+                  anchors.right: trail.visible ? trail.left : parent.right
+                  anchors.rightMargin: trail.visible ? Style.space(6) : (root.rowReservedBorderRight + Style.space(18))
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(3)
+
+                  Text {
+                    id: labelText
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    text: modelData.label
+                    color: root.selectedIndex === index ? root.selectedText : root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.heading
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    text: modelData.detail || ""
+                    visible: !!modelData.detail
+                    color: root.foreground
+                    opacity: 0.52
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    elide: Text.ElideRight
+                  }
                 }
-                Text {
-                  x: Style.space(18); y: Style.space(32)
-                  width: parent.width - x - (modelData.previewFamily ? (modelData.previewSlot ? 116 : 140) : 18)
-                  visible: !!modelData.detail
-                  text: modelData.detail || ""
-                  color: Color.menu.text
-                  opacity: 0.52
-                  font.family: Style.font.menuFamily
-                  font.pixelSize: Style.font.bodySmall
-                  elide: Text.ElideRight
-                }
+
                 Row {
+                  id: trail
                   visible: !!rowItem.modelData.previewFamily
                   anchors.right: parent.right
-                  anchors.rightMargin: 12
+                  anchors.rightMargin: root.rowReservedBorderRight + Style.space(12)
                   anchors.verticalCenter: parent.verticalCenter
-                  spacing: 4
+                  spacing: Style.space(4)
+
                   Repeater {
                     model: rowItem.modelData.previewSlot ? ["", "Filled", "Outline"] : root.slots
                     delegate: Item {
                       id: preview
                       required property string modelData
-                      width: 25; height: 25
+                      width: Style.space(20); height: Style.space(20)
                       Image {
                         id: previewAsset
                         anchors.fill: parent
@@ -370,28 +506,62 @@ Item {
                       ColorOverlay {
                         anchors.fill: previewAsset
                         source: previewAsset
-                        color: Color.menu.text
+                        color: root.selectedIndex === rowItem.index ? root.selectedText : root.foreground
                       }
                     }
                   }
                 }
+
                 MouseArea {
                   anchors.fill: parent
                   hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
                   onEntered: root.selectedIndex = index
                   onClicked: root.activate(index)
                 }
               }
             }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              height: Math.min(Style.space(28), parent.height / 2)
+              visible: opacity > 0
+              opacity: resultList.contentHeight > resultList.height
+                ? Math.max(0, Math.min(1, (resultList.contentY - resultList.originY) / height))
+                : 0
+              gradient: Gradient {
+                GradientStop { position: 0; color: root.background }
+                GradientStop { position: 1; color: Util.alpha(root.background, 0) }
+              }
+            }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              height: Math.min(Style.space(28), parent.height / 2)
+              visible: opacity > 0
+              opacity: resultList.contentHeight > resultList.height
+                ? Math.max(0, Math.min(1, (resultList.originY + resultList.contentHeight - resultList.height - resultList.contentY) / height))
+                : 0
+              gradient: Gradient {
+                GradientStop { position: 0; color: Util.alpha(root.background, 0) }
+                GradientStop { position: 1; color: root.background }
+              }
+            }
           }
-        }
-        Text {
-          x: 0; y: parent.height - Style.space(20)
-          text: root.actionMessage
-          visible: !!text
-          color: Color.muted
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.caption
+
+          Text {
+            textFormat: Text.PlainText
+            width: parent.width
+            text: root.actionMessage
+            visible: !!text
+            color: Color.muted
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
       }
     }
